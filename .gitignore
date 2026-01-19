@@ -1,0 +1,73 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Environment variables
+.env
+.env.local
+.env.production
+
+# Firebase Admin SDK Credentials (CRITICAL - NEVER COMMIT)
+*-adminsdk-*.json
+firebase-adminsdk*.json
+mastavia-pilmapres-firebase-adminsdk*.json
+
+# TensorFlow/Keras
+*.h5
+*.hdf5
+model_checkpoints/
+
+# Dataset (too large for git)
+Data kaggle mastitis/
+datasets/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Compiled files
+*.cpp.bin
+*.ino.bin
+
+# ESP32/Arduino builds (if any)
+.pio/
+.vscode/
+
+# Node modules (if in root)
+node_modules/
+
+# Frontend build output
+esp32-control/dist/
+esp32-control/node_modules/
+esp32-control/.env

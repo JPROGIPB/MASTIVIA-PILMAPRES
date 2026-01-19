@@ -1,0 +1,21 @@
+# Files to ignore during Vercel deployment
+
+# Backend files (should NOT be in frontend)
+../server.py
+../*.py
+../*.h5
+../requirements.txt
+../*-adminsdk-*.json
+
+# Development
+node_modules
+.env.local
+*.log
+
+# Build output is handled by Vercel
+dist
+
+# Test files
+tests/
+*.test.js
+*.spec.js
