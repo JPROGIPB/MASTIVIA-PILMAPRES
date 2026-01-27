@@ -11,6 +11,7 @@ from PIL import Image
 import socket
 import firebase_admin
 from firebase_admin import credentials, db
+import time  # Untuk performance monitoring
 
 app = Flask(__name__)
 CORS(app) # Allow CORS for all domains
@@ -19,7 +20,7 @@ CORS(app) # Allow CORS for all domains
 # Mengambil IP Address laptop secara otomatis dan upload ke Firebase
 # agar ESP32 tidak perlu ganti kodingan saat ganti WiFi.
 
-SERVICE_ACCOUNT_KEY = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'esp32-control', 'mastavia-pilmapres-firebase-adminsdk-fbsvc-ee6ea4e483.json')
+SERVICE_ACCOUNT_KEY = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'MooCare', 'mastavia-pilmapres-firebase-adminsdk-fbsvc-ee6ea4e483.json')
 DB_URL = 'https://mastavia-pilmapres-default-rtdb.asia-southeast1.firebasedatabase.app/'
 
 def get_local_ip():
@@ -74,7 +75,8 @@ def load_model():
         print("Model file not found. Please train the model first.")
 
 # --- NEW: UPLOAD ENDPOINT FOR ESP32-CAM ---
-UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'esp32-control', 'public', 'assets', 'images', 'uploads')
+# Update path ke folder MooCare (bukan esp32-control lagi)
+UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'MooCare', 'public', 'assets', 'images', 'uploads')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 print(f"DEBUG: Folder Upload siap di: {UPLOAD_FOLDER}")
 
@@ -164,9 +166,15 @@ def upload_file():
 
 @app.route('/predict', methods=['POST'])
 def predict():
+    start_time = time.time()
+    print("\n" + "="*60)
+    print(f"[⏱️ TIMING] Request received at {time.strftime('%H:%M:%S')}")
+    
     global model
     if model is None:
+        t0 = time.time()
         load_model()
+        print(f"[⏱️ TIMING] Model loading took: {time.time()-t0:.2f}s")
         if model is None:
             return jsonify({'error': 'Model not loaded'}), 500
 
@@ -177,39 +185,47 @@ def predict():
     
     try:
         # 1. Handle File Upload
+        t1 = time.time()
         if 'image' in request.files:
             file = request.files['image']
             img = Image.open(file)
+            print(f"[⏱️ TIMING] Image upload processed: {time.time()-t1:.2f}s")
             
         # 2. Handle Image URL
         elif 'imageUrl' in request.form:
             url = request.form['imageUrl']
+            print(f"[📥 URL] Fetching from: {url[:80]}...")
+            
             # If it's a relative path from the React app (starting with /assets)
             if url.startswith('/'):
-                 # Construct absolute path pointing to the public folder in esp32-control
+                 # Construct absolute path pointing to the public folder in MooCare
                  base_dir = os.path.dirname(os.path.abspath(__file__))
-                 # Combine base_dir + esp32-control + public + url
-                 file_path = os.path.join(base_dir, 'esp32-control', 'public', url.lstrip('/'))
+                 # Combine base_dir + MooCare + public + url
+                 file_path = os.path.join(base_dir, 'MooCare', 'public', url.lstrip('/'))
                  
                  if os.path.exists(file_path):
                      img = Image.open(file_path)
+                     print(f"[⏱️ TIMING] Local file loaded: {time.time()-t1:.2f}s")
                  else:
                      return jsonify({'error': f'File not found at {file_path}'}), 404
 
             # If it's a local filesystem path (absolute)
             elif os.path.exists(url):
                  img = Image.open(url)
+                 print(f"[⏱️ TIMING] Local file loaded: {time.time()-t1:.2f}s")
             else:
                 # Assuming it's a web URL
                 headers = {'User-Agent': 'Mozilla/5.0'}
-                response = requests.get(url, headers=headers, stream=True)
+                response = requests.get(url, headers=headers, stream=True, timeout=10)
                 response.raise_for_status()
                 img = Image.open(BytesIO(response.content))
+                print(f"[⏱️ TIMING] URL download took: {time.time()-t1:.2f}s")
         
         if img is None:
              return jsonify({'error': 'Failed to process image'}), 400
 
         # Preprocess for MobileNetV2 (224x224, normalized 0-1)
+        t2 = time.time()
         if img.mode != 'RGB':
             img = img.convert('RGB')
             
@@ -220,32 +236,66 @@ def predict():
         # PENTING: Gunakan preprocess_input agar sama dengan training (range -1 s/d 1)
         # Jangan pakai manual division / 255.0 lagi.
         img_array = preprocess_input(img_array)
+        print(f"[⏱️ TIMING] Image preprocessing: {time.time()-t2:.2f}s")
 
         # Predict
-        prediction = model.predict(img_array)
+        t3 = time.time()
+        prediction = model.predict(img_array, verbose=0)
+        print(f"[⏱️ TIMING] AI Prediction took: {time.time()-t3:.2f}s")
         
         # Decode prediction
         # Class 0: Mastitis
         # Class 1: Normal Teats (Alphabetical: m < n)
         score = float(prediction[0][0])
         
-        if score > 0.5:
+        # Status dengan 3 tingkat: Normal, Waspada, Bahaya
+        # score > 0.5 = lebih condong ke Normal
+        # score < 0.5 = lebih condong ke Mastitis
+        
+        if score > 0.7:
+            # Sangat yakin Normal   
             result = "Normal"
             confidence = score
-        else:
-            result = "Mastitis"
+        elif score > 0.5:
+            # Masih Normal tapi perlu diwaspadai
+            result = "Waspada"
+            confidence = score
+        elif score > 0.3:
+            # Condong Mastitis, perlu waspada tinggi
+            result = "Waspada"
             confidence = 1.0 - score
+        else:
+            # Sangat yakin Mastitis - Bahaya
+            result = "Bahaya"
+            confidence = 1.0 - score
+        
+        total_time = time.time() - start_time
+        print(f"[✅ RESULT] {result} ({confidence*100:.1f}%)")
+        print(f"[⏱️ TOTAL] Request completed in: {total_time:.2f}s")
+        print("="*60 + "\n")
         
         return jsonify({
             'result': result,
             'confidence': f"{confidence*100:.1f}%",
-            'raw_score': score
+            'raw_score': score,
+            'processing_time': f"{total_time:.2f}s"
         })
 
     except Exception as e:
         print(f"Prediction Error: {e}")
         return jsonify({'error': str(e)}), 500
 
+# Load model saat startup server (bukan saat request pertama)
+print("\n=== LOADING AI MODEL ===")
+load_model()
+if model is not None:
+    print("=== MODEL READY ===\n")
+else:
+    print("=== WARNING: Model tidak berhasil di-load ===\n")
+
 if __name__ == '__main__':
     # host='0.0.0.0' artinya: Buka akses untuk SEMUA perangkat di WiFi
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    # debug=False dan use_reloader=False agar model TIDAK di-load ulang
+    # Model hanya di-load SEKALI saat server pertama kali jalan
+    # Server hanya restart kalau Anda Ctrl+C dan jalankan lagi manual
+    app.run(host='0.0.0.0', port=5000, debug=False, use_reloader=False)

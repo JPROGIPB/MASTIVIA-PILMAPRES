@@ -6,7 +6,7 @@ import 'jspdf-autotable';
 import { db } from './firebase'; // Import Firebase
 import { ref, onValue, push, set, remove, update } from "firebase/database";
 
-const MastiviaApp = () => {
+const MooCareApp = () => {
   const [activePage, setActivePage] = useState('dashboard');
   const [showNotification, setShowNotification] = useState(false);
   const [showDetailModal, setShowDetailModal] = useState(false);
@@ -170,7 +170,9 @@ const MastiviaApp = () => {
 
   const handleViewDetail = (detection) => {
     const cow = cowData.find(c => c.id === detection.cowId) || {};
-    setSelectedCow({ ...detection, ...cow }); // Merge detection info + static info
+    // FIX: Prioritize detection's iotImage over cow's iotImage
+    // This ensures each detection shows its own captured photo at that moment
+    setSelectedCow({ ...cow, ...detection }); // Detection data overwrites cow data
     setValidationResult(null); 
     setShowDetailModal(true);
   };
@@ -306,25 +308,25 @@ const MastiviaApp = () => {
     // Header
     doc.setFontSize(20);
     doc.setTextColor(22, 163, 74); // Green 600
-    doc.text('MASTIVIA - Laporan Deteksi Mastitis', 14, 22);
+    doc.text('MooCare - Laporan Deteksi Mastitis', 14, 22);
     
     doc.setFontSize(10);
     doc.setTextColor(100);
-    doc.text(`Tanggal Cetak: ${new Date().toLocaleDateString()}`, 14, 30);
+    doc.text(`Tanggal Cetak: ${new Date().toLocaleDateString('id-ID')}`, 14, 30);
     doc.text(`Filter: ${historyTimeFilter}, Status: ${historyStatusFilter}`, 14, 35);
 
     // Table
-    const tableColumn = ["ID", "Kode Sapi", "Status", "Suhu", "Konduktivitas", "Waktu"];
+    const tableColumn = ["No", "Kode Sapi", "Status", "Suhu", "Konduktivitas", "Waktu"];
     const tableRows = [];
 
-    filteredHistoryData.forEach(item => {
+    filteredHistoryData.forEach((item, index) => {
       const rowData = [
-        item.id,
-        item.cowId,
-        item.status,
-        `${item.temp}°C`,
-        `${item.conductivity} mS/m`,
-        item.date,
+        index + 1, // Sequential number
+        item.cowId || '-',
+        item.status || '-',
+        item.temp ? `${item.temp}°C` : '-',
+        item.conductivity ? `${item.conductivity} mS/m` : '-',
+        item.date || '-',
       ];
       tableRows.push(rowData);
     });
@@ -338,7 +340,7 @@ const MastiviaApp = () => {
       headStyles: { fillColor: [22, 163, 74] }, // Green
     });
 
-    doc.save(`Laporan_Mastivia_${new Date().toISOString().slice(0,10)}.pdf`);
+    doc.save(`Laporan_MooCare_${new Date().toISOString().slice(0,10)}.pdf`);
   };
 
   // Custom Tooltip untuk grafik
@@ -375,7 +377,7 @@ const MastiviaApp = () => {
                         <img src="/assets/cow-icon.png" alt="Cow" onError={(e) => {e.target.onerror = null; e.target.src='https://cdn-icons-png.flaticon.com/512/2395/2395796.png'}} className="w-full h-full object-contain" />
                       </div>
                       <div>
-                         <h1 className="font-bold text-green-600 text-xl leading-tight">Mastavia</h1>
+                         <h1 className="font-bold text-green-600 text-xl leading-tight">MooCare</h1>
                          <p className="text-[10px] text-gray-500 font-medium">Monitoring System</p>
                       </div>
                   </div>
@@ -452,7 +454,7 @@ const MastiviaApp = () => {
               </div>
            </div>
            <div className="text-center">
-              <h1 className="font-bold text-green-600 text-xl tracking-tight">Mastivia</h1>
+              <h1 className="font-bold text-green-600 text-xl tracking-tight">MooCare</h1>
               <p className="text-[10px] text-gray-500 font-medium">Monitoring System</p>
            </div>
         </div>
@@ -1194,6 +1196,7 @@ const MastiviaApp = () => {
                                 src={selectedCow.iotImage} 
                                 alt="Live Capture" 
                                 className="w-full h-full object-cover opacity-90 group-hover:opacity-100 transition"
+                                style={{ transform: 'rotate(180deg)' }}
                                 onError={(e) => {
                                     e.target.onerror = null; 
                                     e.target.src = "https://via.placeholder.com/300x200?text=Error+Loading+Image";
@@ -1442,4 +1445,4 @@ const MastiviaApp = () => {
   );
 };
 
-export default MastiviaApp;
+export default MooCareApp;

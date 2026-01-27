@@ -1,5 +1,5 @@
 /**
- * MASTAVIA - ESP32-CAM (LIGHTWEIGHT CLIENT)
+ * MooCare - ESP32-CAM (LIGHTWEIGHT CLIENT)
  * Tugas: Hanya memotret & kirim ke Laptop.
  * TIDAK ADA FIREBASE DI SINI (Hemat Memori).
  */

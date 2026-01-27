@@ -1,4 +1,4 @@
-# MASTAVIA - Dokumentasi Sistem & Operasional
+# MooCare - Dokumentasi Sistem & Operasional
 **Sistem Deteksi Dini Mastitis Sapi berbasis IoT & Artificial Intelligence**
 
 ---

@@ -1,4 +1,4 @@
-# MASTIVIA IoT System
+# MooCare IoT System
 
 Sistem deteksi dini mastitis pada sapi perah menggunakan sensor suhu & konduktivitas, dilengkapi dengan AI image classification.
 

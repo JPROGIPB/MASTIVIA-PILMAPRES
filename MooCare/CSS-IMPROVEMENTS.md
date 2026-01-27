@@ -1,4 +1,4 @@
-# 📋 Laporan Perbaikan CSS Dashboard MASTIVIA
+# 📋 Laporan Perbaikan CSS Dashboard MooCare
 
 ## ✅ Status: SEMUA CSS SUDAH DIPERBAIKI DAN KONSISTEN
 
@@ -229,4 +229,4 @@
 ---
 
 Generated: 10 Januari 2025
-Dashboard: MASTIVIA - Sistem Deteksi Mastitis Sapi Perah
+Dashboard: MooCare - Sistem Deteksi Mastitis Sapi Perah

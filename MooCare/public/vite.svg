@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- MooCare Logo - Cow Icon -->
+  <defs>
+    <linearGradient id="cowGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#22c55e;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#16a34a;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Cow Head -->
+  <ellipse cx="16" cy="18" rx="12" ry="10" fill="url(#cowGradient)"/>
+  
+  <!-- Ears -->
+  <ellipse cx="8" cy="12" rx="3" ry="5" fill="#16a34a"/>
+  <ellipse cx="24" cy="12" rx="3" ry="5" fill="#16a34a"/>
+  
+  <!-- White spots -->
+  <ellipse cx="12" cy="16" rx="2.5" ry="2" fill="#ffffff" opacity="0.8"/>
+  <ellipse cx="20" cy="17" rx="2" ry="1.5" fill="#ffffff" opacity="0.8"/>
+  
+  <!-- Eyes -->
+  <circle cx="12" cy="19" r="1.5" fill="#1f2937"/>
+  <circle cx="20" cy="19" r="1.5" fill="#1f2937"/>
+  <circle cx="12.5" cy="18.5" r="0.5" fill="#ffffff"/>
+  <circle cx="20.5" cy="18.5" r="0.5" fill="#ffffff"/>
+  
+  <!-- Nose -->
+  <ellipse cx="16" cy="23" rx="3" ry="2" fill="#15803d"/>
+  <line x1="16" y1="21" x2="16" y2="23" stroke="#1f2937" stroke-width="0.8"/>
+  
+  <!-- Nostrils -->
+  <circle cx="14.5" cy="23" r="0.7" fill="#064e3b"/>
+  <circle cx="17.5" cy="23" r="0.7" fill="#064e3b"/>
+  
+  <!-- Horns -->
+  <path d="M 7 11 Q 6 8 5 7" stroke="#dcfce7" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+  <path d="M 25 11 Q 26 8 27 7" stroke="#dcfce7" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+</svg>

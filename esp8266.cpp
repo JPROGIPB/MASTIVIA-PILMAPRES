@@ -1,5 +1,5 @@
 /**
- * MASTIVIA - Master Node (ESP8266)
+ * MooCare - Master Node (ESP8266)
  * VERSION 3.7 (FIXED: PHOTO TRIGGER IN MENU B ADDED)
  */
 
@@ -39,7 +39,7 @@ const char* dbBaseURL    = "https://mastavia-pilmapres-default-rtdb.asia-southea
 // WARNA UI
 #define C_BG 0x0000 
 #define C_WHITE 0xFFFF
-#define C_MASTIVIA 0x07E0 
+#define C_MOOCARE 0x07E0 
 #define C_GRAY 0x8410
 #define C_DARK_GRAY 0x4208
 #define C_WARN 0xFD20 
@@ -167,7 +167,7 @@ void loop() {
 
 // ===================== LOGIC UTAMA =====================
 void bootSequence() {
-  tft.fillScreen(C_BG); tft.setTextSize(2); tft.setTextColor(C_MASTIVIA); tft.setCursor(35, 50); tft.print("mastivia"); 
+  tft.fillScreen(C_BG); tft.setTextSize(2); tft.setTextColor(C_MOOCARE); tft.setCursor(35, 50); tft.print("MooCare"); 
   WiFi.mode(WIFI_STA); WiFi.begin(def_ssid, def_password);
   unsigned long startT = millis(); bool connected = false;
   
@@ -200,7 +200,7 @@ void drawRescueMenu() {
 }
 
 void connectAutoOpen() {
-  tft.fillScreen(C_BG); tft.setTextColor(C_MASTIVIA); tft.setCursor(10, 50); tft.print("Scanning...");
+  tft.fillScreen(C_BG); tft.setTextColor(C_MOOCARE); tft.setCursor(10, 50); tft.print("Scanning...");
   int n = WiFi.scanNetworks(); bool found = false;
   for (int i = 0; i < n; ++i) {
     if (WiFi.encryptionType(i) == ENC_TYPE_NONE) {
@@ -314,7 +314,7 @@ void loopInputID(char key) {
   else if (key == 'C') { currentID = ""; tft.fillRect(12, 45, 136, 20, C_BG); }
   else if (key == '*') { drawMainMenu(); currentState = STATE_MENU; }
   else if (key == '#' && currentID.length() > 0) {
-    tft.setCursor(10, 75); tft.setTextColor(C_MASTIVIA); tft.print("Validasi ID...");
+    tft.setCursor(10, 75); tft.setTextColor(C_MOOCARE); tft.print("Validasi ID...");
     
     // Cek Database
     if (validateIDInDB(currentID)) {
@@ -338,7 +338,7 @@ void loopInputID(char key) {
 
 void drawPhotoAsk() {
   tft.fillScreen(C_BG); tft.setTextColor(C_WHITE); tft.setTextSize(2); tft.setCursor(20, 20); tft.print("CAPTURE?"); tft.setTextSize(1);
-  tft.fillRoundRect(10, 60, 65, 30, 4, C_MASTIVIA); tft.setTextColor(C_BG); tft.setCursor(22, 70); tft.print("[A] YA");
+  tft.fillRoundRect(10, 60, 65, 30, 4, C_MOOCARE); tft.setTextColor(C_BG); tft.setCursor(22, 70); tft.print("[A] YA");
   tft.drawRoundRect(85, 60, 65, 30, 4, C_WHITE); tft.setTextColor(C_WHITE); tft.setCursor(97, 70); tft.print("[B] NO"); tft.setCursor(50, 110); tft.setTextColor(C_ERROR); tft.print("[*] BATAL");
 }
 
