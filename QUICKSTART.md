@@ -5,7 +5,7 @@
 ### 1️⃣ PUSH KE GITHUB (5 menit)
 
 ```bash
-cd "c:\Users\Julman Waruwu\Documents\JOKIAN PILMAPRES"
+# Dari folder project Anda
 git add .
 git commit -m "feat: ready for production deployment"
 git push origin main
