@@ -1,6 +1,6 @@
 /**
- * MooCare - Master Node (ESP8266)
- * VERSION 3.7 (FIXED: PHOTO TRIGGER IN MENU B ADDED)
+ * MOOCARE - Master Node (ESP8266)
+ * VERSION STABLE - NO OTA (FULL FIX)
  */
 
 #include <ESP8266WiFi.h>
@@ -11,459 +11,278 @@
 #include <Adafruit_MLX90614.h>
 #include <Wire.h>
 #include <PCF8574.h>
-#include <time.h> 
+#include <time.h>
 
 // --- PIN CONFIG ---
-#define TFT_CS    15   // D8
-#define TFT_DC    0    // D3
-#define TFT_RES   2    // D4
-#define TDS_PIN   A0   
-#define SDA_PIN   4    // D2
-#define SCL_PIN   5    // D1
+#define SDA_PIN    4 // D2
+#define SCL_PIN    5 // D1
+#define TFT_CS     15
+#define TFT_DC     0
+#define TFT_RES    2
+#define TDS_PIN    A0
 #define PCF8574_ADDR 0x20
-#define PIN_BUZZER   16  // D0
+#define PIN_BUZZER   16
 
 // --- WIFI & FIREBASE ---
-// PASTIKAN SSID & PASSWORD INI SAMA DENGAN YANG DIPAKAI LAPTOP SERVER
-const char* def_ssid     = "Rumah_Larosa"; 
-const char* def_password = "togalarosa";
-
-// PASTIKAN DIAKHIRI TANDA "/"
+const char* def_ssid     = "iQOO Z9 5G";
+const char* def_password = "11223344";
 const char* dbBaseURL    = "https://mastavia-pilmapres-default-rtdb.asia-southeast1.firebasedatabase.app/";
 
-// --- SETUP LAINNYA ---
-#define NTP_SERVER "pool.ntp.org"
-#define TZ_OFFSET 7 * 3600 
-#define DST_OFFSET 0
+String sIP = "";
+String sPort = "5000";
+#define TZ_OFFSET 7 * 3600
 
 // WARNA UI
-#define C_BG 0x0000 
+#define C_BG 0x0000
 #define C_WHITE 0xFFFF
 #define C_MOOCARE 0x07E0 
 #define C_GRAY 0x8410
 #define C_DARK_GRAY 0x4208
-#define C_WARN 0xFD20 
-#define C_ERROR 0xF800 
-#define C_SUCCESS 0x07E0 
+#define C_WARN 0xFD20
+#define C_ERROR 0xF800
+#define C_SUCCESS 0x07E0
 #define C_BLUE 0x051F
 
-// OBJEK
 Adafruit_ST7735 tft = Adafruit_ST7735(TFT_CS, TFT_DC, TFT_RES);
 Adafruit_MLX90614 mlx = Adafruit_MLX90614();
 PCF8574 pcf8574(PCF8574_ADDR);
 
-const int rowPins[4] = {7, 6, 5, 4}; 
-const int colPins[4] = {3, 2, 1, 0}; 
+const int rowPins[4] = {7, 6, 5, 4};
+const int colPins[4] = {3, 2, 1, 0};
 char keys[4][4] = {{'1','2','3','A'},{'4','5','6','B'},{'7','8','9','C'},{'*','0','#','D'}};
 
-enum AppState { STATE_BOOT, STATE_RESCUE, STATE_MENU, STATE_INPUT_ID, STATE_PHOTO_ASK, STATE_CAM_MODE, STATE_MEASURE_READY, STATE_RESULT };
+enum AppState { 
+  STATE_BOOT, STATE_MENU, STATE_INPUT_ID, 
+  STATE_MEASURE_TEMP, STATE_MEASURE_COND, 
+  STATE_PHOTO_ASK, STATE_CAM_MODE, STATE_RESULT 
+};
 AppState currentState = STATE_BOOT;
 
 int flowType = 0; 
 String currentID = "";
-float valTemp = 0.0;
-float valCond = 0.0;
-bool isOfflineMode = false;
+float valTemp = 0.0, valCond = 0.0;
+bool isOfflineMode = true;
 
-// --- HARDWARE HELPER ---
-void beepShort() { digitalWrite(PIN_BUZZER, HIGH); delay(100); digitalWrite(PIN_BUZZER, LOW); }
-void beepAlarm() { for(int i=0; i<3; i++) { digitalWrite(PIN_BUZZER, HIGH); delay(80); digitalWrite(PIN_BUZZER, LOW); delay(50); } }
+// ===================== PROTOTIPE FUNGSI =====================
+void drawMainMenu();
+void drawInputUI();
+void drawMeasureTempUI();
+void drawMeasureCondUI();
+void drawResultUI();
+void drawPhotoAsk();
+void drawCamInterface();
+void showBypassMessage(String msg1, String msg2);
+void showStatusAnim(bool success);
+void fetchServerConfig();
+void bootSequence();
+void connectAutoOpen();
+bool validateIDInDB(String id);
+bool checkDailyDuplicate(String id, String type);
+void logDailyActivity(String id, String type);
+void beepShort();
+void beepAlarm();
+char readKeypad();
+String getFullFormattedTime();
+void showLoadingBar(int p);
+void drawSignal(int x, int y, uint16_t color);
+void drawIconQuick(int x, int y, uint16_t color);
+void drawIconCow(int x, int y, uint16_t color);
+void drawIconCam(int x, int y, uint16_t color);
+void drawIconWiFi(int x, int y, uint16_t color);
+void drawIconRescan(int x, int y, uint16_t color);
 
-char readKeypad() {
-  for (int r = 0; r < 4; r++) {
-    for (int i = 0; i < 4; i++) pcf8574.write(rowPins[i], HIGH);
-    pcf8574.write(rowPins[r], LOW);
-    for (int c = 0; c < 4; c++) {
-      if (pcf8574.read(colPins[c]) == LOW) {
-        beepShort(); delay(100); while(pcf8574.read(colPins[c]) == LOW) yield(); return keys[r][c];
-      }
-    }
-  } return 0;
-}
+// ===================== CORE LOGIC =====================
 
-// --- TIME & LOG ---
-void setupTime() { configTime(TZ_OFFSET, DST_OFFSET, NTP_SERVER); }
-String getTodayDate() {
-  time_t now = time(nullptr); struct tm* timeinfo = localtime(&now);
-  char buffer[12]; strftime(buffer, sizeof(buffer), "%Y-%m-%d", timeinfo); return String(buffer);
-}
-String getFullFormattedTime() {
-  time_t now = time(nullptr); struct tm* timeinfo = localtime(&now);
-  char buffer[20]; strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M", timeinfo); return String(buffer);
-}
-bool checkDailyDuplicate(String id, String type) {
-  if (isOfflineMode) return false;
-  String today = getTodayDate(); if (today.startsWith("1970")) return false; 
-  WiFiClientSecure client; client.setInsecure(); HTTPClient http;
-  String url = String(dbBaseURL) + "daily_logs/" + today + "/" + id + "/" + type + ".json";
-  http.begin(client, url); int httpCode = http.GET(); String payload = http.getString(); http.end();
-  return (httpCode == 200 && payload != "null");
-}
-void logDailyActivity(String id, String type) {
-  if (isOfflineMode) return;
-  String today = getTodayDate(); WiFiClientSecure client; client.setInsecure(); HTTPClient http;
-  String url = String(dbBaseURL) + "daily_logs/" + today + "/" + id + "/" + type + ".json";
-  http.begin(client, url); http.PUT("true"); http.end();
-}
-
-// --- UI HELPERS ---
-void drawSignal(int x, int y, uint16_t color) { for(int i=0; i<4; i++) tft.fillRect(x+(i*3), y+(6-(i*2)), 2, 4+(i*2), color); }
-void drawIconQuick(int x, int y, uint16_t color) { tft.fillTriangle(x+10, y, x+4, y+10, x+10, y+10, color); tft.fillTriangle(x+8, y+20, x+16, y+8, x+8, y+8, color); }
-void drawIconCow(int x, int y, uint16_t color) { tft.fillRoundRect(x, y+4, 22, 14, 3, color); tft.fillCircle(x+2, y+4, 3, color); tft.fillCircle(x+20, y+4, 3, color); tft.fillRect(x+7, y+13, 8, 4, C_BG); }
-void drawIconCam(int x, int y, uint16_t color) { tft.fillRoundRect(x, y+4, 24, 15, 2, color); tft.fillRect(x+8, y, 8, 4, color); tft.fillCircle(x+12, y+11, 6, C_BG); tft.fillCircle(x+12, y+11, 2, color); }
-void showLoadingBar(int percent) { int w = map(percent, 0, 100, 0, 100); tft.drawRect(30, 80, 102, 8, C_WHITE); tft.fillRect(31, 81, w, 6, C_WHITE); }
-
-void showStatusAnim(bool success) {
-  tft.fillScreen(C_BG); int cx = 80, cy = 60;
-  for(int r=0; r<=28; r+=7) { tft.fillCircle(cx, cy, r, C_WHITE); delay(30); }
-  if(success) {
-    beepShort(); 
-    tft.drawLine(cx-10, cy, cx-3, cy+10, C_SUCCESS); tft.drawLine(cx-9, cy, cx-2, cy+10, C_SUCCESS); 
-    tft.setCursor(45, 100); tft.setTextColor(C_SUCCESS); tft.print("BERHASIL");
-  } else {
-    beepAlarm();
-    tft.drawLine(cx-10, cy-10, cx+10, cy+10, C_ERROR); tft.drawLine(cx-9, cy-10, cx+11, cy+10, C_ERROR); 
-    tft.setCursor(55, 100); tft.setTextColor(C_ERROR); tft.print("GAGAL");
-  } delay(1500);
-}
-
-void showBypassMessage(String msg1, String msg2) { 
-  tft.fillScreen(C_BG); 
-  tft.fillRoundRect(10, 30, 140, 70, 5, C_WHITE); 
-  tft.setTextColor(C_DARK_GRAY); tft.setTextSize(1); 
-  tft.setCursor(20, 45); tft.print("INFO:"); 
-  tft.setTextColor(C_ERROR); 
-  tft.setCursor(20, 65); tft.print(msg1); 
-  tft.setCursor(20, 80); tft.print(msg2); 
-  delay(2000); 
-}
-
-// ===================== SETUP =====================
 void setup() {
-  Serial.begin(115200); 
-  pinMode(PIN_BUZZER, OUTPUT); digitalWrite(PIN_BUZZER, LOW);
-  
-  Wire.begin(SDA_PIN, SCL_PIN); Wire.setClock(100000); 
-  pcf8574.begin(); for(int i=0; i<4; i++) pcf8574.write(colPins[i], HIGH);
+  Serial.begin(115200);
+  pinMode(PIN_BUZZER, OUTPUT);
+  delay(1000); 
+
+  Wire.begin(SDA_PIN, SCL_PIN);
+  Wire.setClock(100000); 
+  delay(100);
+
+  if (pcf8574.begin()) {
+    for(int i=0; i<8; i++) pcf8574.write(i, HIGH);
+  }
+
   mlx.begin();
-  tft.initR(INITR_BLACKTAB); tft.setRotation(1);
+  tft.initR(INITR_BLACKTAB); 
+  tft.setRotation(3); 
   
-  currentState = STATE_BOOT;
   bootSequence();
 }
 
 void loop() {
   char key = readKeypad();
   switch(currentState) {
-    case STATE_RESCUE: loopRescue(key); break;
-    case STATE_MENU:   loopMenu(key); break;
-    case STATE_INPUT_ID: loopInputID(key); break;
-    case STATE_PHOTO_ASK: loopPhotoAsk(key); break;
-    case STATE_CAM_MODE: loopCamMode(key); break;
-    case STATE_MEASURE_READY: loopMeasureReady(key); break; 
-    case STATE_RESULT: loopResult(key); break;   
+    case STATE_MENU:
+      if(key == 'A') { flowType = 0; currentID = "QUICK"; drawMeasureTempUI(); currentState = STATE_MEASURE_TEMP; }
+      else if(key == 'B') {
+        if(isOfflineMode) connectAutoOpen();
+        else { flowType = 1; currentID = ""; drawInputUI(); currentState = STATE_INPUT_ID; }
+      }
+      else if(key == 'C') {
+        if(isOfflineMode) bootSequence();
+        else { flowType = 2; currentID = ""; drawInputUI(); currentState = STATE_INPUT_ID; }
+      }
+      break;
+
+    case STATE_INPUT_ID:
+      if (key >= '0' && key <= '9' && currentID.length() < 5) {
+        currentID += key; tft.fillRect(15, 35, 130, 30, C_BG); 
+        tft.setCursor(25, 40); tft.setTextSize(2); tft.setTextColor(C_MOOCARE); tft.print(currentID); tft.setTextSize(1);
+      } else if (key == 'C') { currentID = ""; tft.fillRect(15, 35, 130, 30, C_BG); }
+      else if (key == '*') { drawMainMenu(); currentState = STATE_MENU; }
+      else if (key == '#' && currentID.length() > 0) {
+        tft.setCursor(10, 75); tft.setTextColor(C_WHITE); tft.print("Validating...");
+        if (validateIDInDB(currentID)) {
+          // Cek duplikasi untuk SEMUA flowType (termasuk CAM only)
+          String checkType = (flowType == 1) ? "sensor" : "photo";
+          if (checkDailyDuplicate(currentID, checkType)) {
+            showBypassMessage("DUPLIKAT", "SUDAH DIPERIKSA"); drawMainMenu(); currentState = STATE_MENU;
+          } else {
+            if (flowType == 2) { drawCamInterface(); currentState = STATE_CAM_MODE; }
+            else { drawMeasureTempUI(); currentState = STATE_MEASURE_TEMP; }
+          }
+        } else { showBypassMessage("GAGAL", "ID TAK TERDAFTAR"); drawInputUI(); }
+      }
+      break;
+
+    case STATE_MEASURE_TEMP:
+      if(key == 'A') {
+        tft.fillRect(10, 70, 140, 30, C_WHITE); tft.setTextColor(C_BG); tft.setCursor(25, 80); tft.print("UKUR SUHU...");
+        mlx.readObjectTempC(); delay(100); 
+        float ts = 0; int sm = 0;
+        for(int i=0; i<20; i++) {
+          float t = mlx.readObjectTempC();
+          if(!isnan(t) && t < 100.0 && t > 10.0) { ts += t; sm++; }
+          delay(50);
+        }
+        if(sm == 0) { showBypassMessage("ERROR", "SENSOR SUHU GAGAL"); drawMeasureTempUI(); }
+        else { valTemp = ts / sm; beepShort(); drawMeasureCondUI(); currentState = STATE_MEASURE_COND; }
+      } else if(key == '*') { drawMainMenu(); currentState = STATE_MENU; }
+      break;
+
+    case STATE_MEASURE_COND:
+      if(key == 'A') {
+        tft.fillRect(10, 70, 140, 30, C_WHITE); tft.setTextColor(C_BG); tft.setCursor(20, 80); tft.print("UKUR TDS...");
+        float vsSum = 0;
+        for(int i=0; i<30; i++) {
+          vsSum += (float)analogRead(TDS_PIN) * 3.3 / 1024.0;
+          delay(50);
+        }
+        float avgV = vsSum / 30.0;
+        float tdsValue = (133.42 * avgV * avgV * avgV - 255.86 * avgV * avgV + 857.39 * avgV) * 0.5;
+        valCond = (tdsValue * 2.0) / 100.0; 
+        beepShort();
+        if(flowType == 0) { drawResultUI(); currentState = STATE_RESULT; }
+        else { drawPhotoAsk(); currentState = STATE_PHOTO_ASK; }
+      } else if(key == '*') { drawMainMenu(); currentState = STATE_MENU; }
+      break;
+
+    case STATE_PHOTO_ASK:
+      if(key == 'A') { drawCamInterface(); currentState = STATE_CAM_MODE; }
+      else if(key == 'B') { drawResultUI(); currentState = STATE_RESULT; }
+      break;
+
+    case STATE_CAM_MODE:
+      if(key == 'A') {
+        tft.fillRect(10, 105, 140, 20, C_WHITE); tft.setTextColor(C_BG); tft.setCursor(25, 110); tft.print("CAPTURING...");
+        Serial.println("SNAP:" + currentID);
+        delay(2000);
+        logDailyActivity(currentID, "photo");
+        if (flowType == 2) { showStatusAnim(true); drawMainMenu(); currentState = STATE_MENU; }
+        else { drawResultUI(); currentState = STATE_RESULT; }
+      } else if(key == '*') { drawMainMenu(); currentState = STATE_MENU; }
+      break;
+
+    case STATE_RESULT:
+      if(key == 'A') { drawMeasureTempUI(); currentState = STATE_MEASURE_TEMP; }
+      else if(key == '*') { drawMainMenu(); currentState = STATE_MENU; }
+      else if(key == 'B' && flowType == 1) {
+        tft.fillScreen(C_BG); tft.setCursor(40, 60); tft.setTextColor(C_WHITE); tft.print("MENGIRIM...");
+        WiFiClientSecure cl; cl.setInsecure(); HTTPClient ht;
+        String st = "Normal";
+        if (valTemp > 39.0 || valCond > 6.5) st = "Bahaya";
+        else if ((valTemp >= 38.1 && valTemp <= 39.0) || (valCond >= 6.1 && valCond <= 6.5)) st = "Waspada";
+        String js = "{\"cowId\":\""+currentID+"\",\"temp\":"+String(valTemp,1)+",\"conductivity\":"+String(valCond,1)+",\"status\":\""+st+"\",\"date\":\""+getFullFormattedTime()+"\"}";
+        ht.begin(cl, String(dbBaseURL)+"detections.json"); int r = ht.POST(js); ht.end();
+        if(r == 200) { logDailyActivity(currentID, "sensor"); showStatusAnim(true); drawMainMenu(); currentState = STATE_MENU; }
+        else showStatusAnim(false);
+      }
+      break;
   }
 }
 
-// ===================== LOGIC UTAMA =====================
+// ===================== DEFINISI FUNGSI UI & SYSTEM =====================
+
 void bootSequence() {
-  tft.fillScreen(C_BG); tft.setTextSize(2); tft.setTextColor(C_MOOCARE); tft.setCursor(35, 50); tft.print("MooCare"); 
-  WiFi.mode(WIFI_STA); WiFi.begin(def_ssid, def_password);
-  unsigned long startT = millis(); bool connected = false;
-  
-  // Tunggu 10 detik
-  while(millis() - startT < 10000) {
-    if(WiFi.status() == WL_CONNECTED) { connected = true; showLoadingBar(100); break; }
-    showLoadingBar(map(millis() - startT, 0, 10000, 0, 95)); delay(100);
-  }
-  
-  if(connected) { 
-    setupTime(); 
-    delay(500); 
-    isOfflineMode = false; // ONLINE
-    drawMainMenu(); 
-    currentState = STATE_MENU; 
-  } else { 
-    isOfflineMode = true; // OFFLINE
-    drawRescueMenu(); 
-    currentState = STATE_RESCUE; 
-  }
+  tft.fillScreen(C_BG);
+  tft.setCursor(35, 45); tft.setTextSize(2); tft.setTextColor(C_MOOCARE); tft.print("MooCare"); 
+  tft.setTextSize(1); tft.setTextColor(C_GRAY); tft.setCursor(30, 65); tft.print("Mastitis Detector");
+  WiFi.disconnect(); WiFi.mode(WIFI_STA); delay(500); WiFi.begin(def_ssid, def_password);
+  unsigned long st = millis(); 
+  while(millis() - st < 15000 && WiFi.status() != WL_CONNECTED) { showLoadingBar(map(millis()-st, 0, 15000, 0, 98)); delay(150); }
+  if(WiFi.status() == WL_CONNECTED) { 
+    showLoadingBar(100); delay(500); configTime(TZ_OFFSET, 0, "pool.ntp.org");
+    isOfflineMode = false; fetchServerConfig();
+    // Share WiFi ke ESP32-CAM (secured network dengan password)
+    for(int i=0; i<3; i++) { Serial.println("WIFI:" + String(def_ssid) + "," + String(def_password)); delay(100); }
+  } else { isOfflineMode = true; }
+  drawMainMenu(); currentState = STATE_MENU;
 }
 
-// --- RESCUE MENU (Sesuai Permintaan) ---
-void drawRescueMenu() {
-  tft.fillScreen(C_BG); tft.drawRect(5, 5, 150, 118, C_ERROR); tft.setTextColor(C_WHITE); tft.setTextSize(1);
-  tft.setCursor(45, 15); tft.print("CONNECTION"); tft.setCursor(55, 25); tft.print("FAILED");
-  tft.setCursor(20, 50); tft.print("1. RESCAN");
-  tft.setCursor(20, 70); tft.print("2. AUTO OPEN");
-  tft.setCursor(20, 90); tft.print("3. MODE OFFLINE");
-}
-
-void connectAutoOpen() {
-  tft.fillScreen(C_BG); tft.setTextColor(C_MOOCARE); tft.setCursor(10, 50); tft.print("Scanning...");
-  int n = WiFi.scanNetworks(); bool found = false;
-  for (int i = 0; i < n; ++i) {
-    if (WiFi.encryptionType(i) == ENC_TYPE_NONE) {
-      tft.setCursor(10, 70); tft.print("Try: " + WiFi.SSID(i)); WiFi.begin(WiFi.SSID(i));
-      unsigned long s = millis(); while(millis() - s < 8000) { if(WiFi.status() == WL_CONNECTED) { found = true; break; } delay(100); }
-    } if(found) break;
-  }
-  if(found) { isOfflineMode = false; setupTime(); drawMainMenu(); currentState = STATE_MENU; } 
-  else { tft.setCursor(10, 90); tft.setTextColor(C_ERROR); tft.print("Gagal!"); delay(1000); drawRescueMenu(); }
-}
-
-void loopRescue(char key) {
-  if (key == '1') { // RESCAN / REBOOT
-    tft.fillScreen(C_BG); tft.setCursor(40,60); tft.print("Rebooting..."); 
-    delay(500); ESP.restart(); 
-  }
-  if (key == '2') { // AUTO OPEN
-    connectAutoOpen(); 
-  }
-  if (key == '3') { // MASUK MODE OFFLINE
-    isOfflineMode = true; 
-    WiFi.disconnect(); 
-    drawMainMenu(); 
-    currentState = STATE_MENU; 
-  }
+void fetchServerConfig() {
+  if (isOfflineMode) return;
+  WiFiClientSecure cl; cl.setInsecure(); HTTPClient ht;
+  ht.begin(cl, String(dbBaseURL) + "server_config.json");
+  if (ht.GET() == 200) {
+    String p = ht.getString();
+    int iS = p.indexOf("\"ip\":\"") + 6, iE = p.indexOf("\"", iS);
+    int pS = p.indexOf("\"port\":") + 7, pE = p.indexOf(",", pS);
+    if (pE == -1) pE = p.indexOf("}", pS);
+    if (iS > 5) {
+      sIP = p.substring(iS, iE); sPort = p.substring(pS, pE);
+    }
+  } ht.end();
 }
 
 void drawMainMenu() {
-  tft.fillScreen(C_BG); tft.fillRect(0, 0, 160, 14, C_DARK_GRAY);
-  tft.setTextSize(1); tft.setTextColor(C_WHITE); tft.setCursor(5, 3); tft.print(isOfflineMode ? "OFFLINE MODE" : "ONLINE");
+  tft.setTextSize(1); tft.fillScreen(C_BG); tft.fillRect(0, 0, 160, 14, C_DARK_GRAY);
+  tft.setTextColor(C_WHITE); tft.setCursor(5, 3); tft.print(isOfflineMode ? "OFFLINE" : "ONLINE");
   if(!isOfflineMode) drawSignal(145, 3, C_SUCCESS);
-  
-  // ICON TETAP DIGAMBAR
-  int boxY = 25, iconY = 32, textInY = 60, keyY = 82;
-  tft.fillRoundRect(5, boxY, 46, 50, 4, C_DARK_GRAY); drawIconQuick(18, iconY, C_WARN); tft.setTextColor(C_WARN); tft.setCursor(13, textInY); tft.print("CEPAT"); tft.setCursor(24, keyY); tft.print("A");     
-  
-  // WARNA BERUBAH JIKA OFFLINE (Visual Feedback)
-  uint16_t c_sapi_bg = isOfflineMode ? 0x2104 : C_BLUE; 
-  uint16_t c_sapi_fg = isOfflineMode ? C_GRAY : C_WHITE; 
-  tft.fillRoundRect(57, boxY, 46, 50, 4, c_sapi_bg); drawIconCow(68, iconY, c_sapi_fg); tft.setTextColor(c_sapi_fg); tft.setCursor(67, textInY); tft.print("SAPI"); tft.setCursor(76, keyY); tft.print("B");
-  
-  uint16_t c_cam_bg = isOfflineMode ? 0x2104 : C_BLUE; 
-  uint16_t c_cam_fg = isOfflineMode ? C_GRAY : C_WHITE;
-  tft.fillRoundRect(109, boxY, 46, 50, 4, c_cam_bg); drawIconCam(119, iconY, c_cam_fg); tft.setTextColor(c_cam_fg); tft.setCursor(120, textInY); tft.print("CAM"); tft.setCursor(129, keyY); tft.print("C");
-  
-  tft.setTextColor(C_GRAY); tft.setCursor(35, 105); tft.print(isOfflineMode ? "Mode Terbatas" : "Pilih Menu");
-}
-
-// --- LOGIKA MENU DENGAN PEMBLOKIRAN ---
-void loopMenu(char key) {
-  if (key == 'A') { 
-    flowType = 0; drawMeasureReadyUI(); currentState = STATE_MEASURE_READY; 
-  }
-  else if (key == 'B') { 
-    if (isOfflineMode) {
-       showBypassMessage("AKSES DITOLAK", "KONEKSI OFFLINE");
-       drawMainMenu(); // Refresh layar
-    } else {
-       flowType = 1; drawInputUI(); currentState = STATE_INPUT_ID; 
-    }
-  }
-  else if (key == 'C') { 
-    if (isOfflineMode) {
-       showBypassMessage("AKSES DITOLAK", "KONEKSI OFFLINE");
-       drawMainMenu();
-    } else {
-       flowType = 2; drawInputUI(); currentState = STATE_INPUT_ID; 
-    }
+  int bY = 25;
+  tft.fillRoundRect(5, bY, 46, 50, 4, C_DARK_GRAY); drawIconQuick(18, 32, C_WARN); tft.setTextColor(C_WARN); tft.setCursor(13, 60); tft.print("CEPAT"); tft.setCursor(24, 82); tft.print("A"); 
+  if(isOfflineMode) {
+    tft.fillRoundRect(57, bY, 46, 50, 4, 0x2104); drawIconWiFi(68, 32, C_WHITE); tft.setTextColor(C_WHITE); tft.setCursor(67, 60); tft.print("AUTO"); tft.setCursor(76, 82); tft.print("B");
+    tft.fillRoundRect(109, bY, 46, 50, 4, 0x2104); drawIconRescan(120, 32, C_WHITE); tft.setTextColor(C_WHITE); tft.setCursor(118, 60); tft.print("SCAN"); tft.setCursor(129, 82); tft.print("C");
+  } else {
+    tft.fillRoundRect(57, bY, 46, 50, 4, C_BLUE); drawIconCow(68, 32, C_WHITE); tft.setTextColor(C_WHITE); tft.setCursor(67, 60); tft.print("SAPI"); tft.setCursor(76, 82); tft.print("B");
+    tft.fillRoundRect(109, bY, 46, 50, 4, C_BLUE); drawIconCam(119, 32, C_WHITE); tft.setTextColor(C_WHITE); tft.setCursor(120, 60); tft.print("CAM"); tft.setCursor(129, 82); tft.print("C");
   }
 }
 
-void drawInputUI() {
-  tft.fillScreen(C_BG); tft.setTextColor(C_WHITE); tft.setCursor(10, 10); tft.print("INPUT ID SAPI:"); tft.drawRoundRect(10, 40, 140, 30, 2, C_WHITE);
-  tft.setCursor(10, 90); tft.setTextColor(C_GRAY); tft.print("[#]OK  [C]CLR"); tft.setCursor(10, 105); tft.setTextColor(C_ERROR); tft.print("[*] BATAL");
-  currentID = "";
-}
-
-// --- PERBAIKAN VALIDASI DATABASE ---
-bool validateIDInDB(String id) {
-  if (isOfflineMode) return false;
-
-  WiFiClientSecure client; 
-  client.setInsecure(); // PENTING: Bypass SSL Check
-  HTTPClient http;
-  
-  // Format Query Firebase: OrderBy & EqualTo
-  // Pastikan di Firebase Rules "id" sudah di index (.indexOn)
-  String url = String(dbBaseURL) + "cows.json?orderBy=\"id\"&equalTo=\"" + id + "\"";
-  
-  Serial.println("Cek URL: " + url); // DEBUGGING KE SERIAL
-  
-  http.begin(client, url); 
-  int code = http.GET(); 
-  String payload = http.getString(); 
-  http.end();
-  
-  Serial.print("Code: "); Serial.println(code); // DEBUG CODE
-  Serial.print("Data: "); Serial.println(payload); // DEBUG DATA
-
-  // SYARAT VALID:
-  // 1. Code 200 (OK)
-  // 2. Payload bukan "null" string
-  // 3. Panjang data > 2 (artinya bukan objek kosong "{}")
-  return (code == 200 && payload != "null" && payload.length() > 2);
-}
-
-void loopInputID(char key) {
-  if (key >= '0' && key <= '9' && currentID.length() < 5) {
-    currentID += key; tft.fillRect(12, 45, 136, 20, C_BG); tft.setCursor(15, 48); tft.setTextSize(2); tft.setTextColor(C_WARN); tft.print(currentID); tft.setTextSize(1);
-  }
-  else if (key == 'C') { currentID = ""; tft.fillRect(12, 45, 136, 20, C_BG); }
-  else if (key == '*') { drawMainMenu(); currentState = STATE_MENU; }
-  else if (key == '#' && currentID.length() > 0) {
-    tft.setCursor(10, 75); tft.setTextColor(C_MOOCARE); tft.print("Validasi ID...");
-    
-    // Cek Database
-    if (validateIDInDB(currentID)) {
-      // Cek Duplikat Harian
-      String checkType = (flowType == 1) ? "sensor" : "photo";
-      if (checkDailyDuplicate(currentID, checkType)) {
-         if (flowType == 1) showBypassMessage("SAPI SUDAH", "DIPERIKSA HARI INI"); else showBypassMessage("FOTO SAPI", "SUDAH TERSEDIA");
-         drawMainMenu(); currentState = STATE_MENU; return;
-      }
-      
-      // Lanjut Sesuai Menu
-      if (flowType == 1) { drawPhotoAsk(); currentState = STATE_PHOTO_ASK; } 
-      else { drawCamInterface(); currentState = STATE_CAM_MODE; }
-      
-    } else { 
-      tft.fillRect(10, 75, 140, 10, C_BG); tft.setCursor(10, 75); tft.setTextColor(C_ERROR); tft.print("ID TIDAK TERDAFTAR!"); 
-      delay(1500); drawInputUI(); 
-    }
-  }
-}
-
-void drawPhotoAsk() {
-  tft.fillScreen(C_BG); tft.setTextColor(C_WHITE); tft.setTextSize(2); tft.setCursor(20, 20); tft.print("CAPTURE?"); tft.setTextSize(1);
-  tft.fillRoundRect(10, 60, 65, 30, 4, C_MOOCARE); tft.setTextColor(C_BG); tft.setCursor(22, 70); tft.print("[A] YA");
-  tft.drawRoundRect(85, 60, 65, 30, 4, C_WHITE); tft.setTextColor(C_WHITE); tft.setCursor(97, 70); tft.print("[B] NO"); tft.setCursor(50, 110); tft.setTextColor(C_ERROR); tft.print("[*] BATAL");
-}
-
-// ===============================================
-// BAGIAN INI SUDAH DIPERBAIKI (ADDED SERIAL SNAP)
-// ===============================================
-void loopPhotoAsk(char key) {
-  if(key == 'A') { 
-    // Tampilkan status di layar
-    tft.fillScreen(C_BG); 
-    tft.setTextColor(C_WHITE); 
-    tft.setCursor(40, 50); 
-    tft.print("SIAP FOTO..."); 
-    
-    // >>> PERBAIKAN: KIRIM PERINTAH KE ESP32 VIA SERIAL <<<
-    Serial.println("SNAP:" + currentID); 
-    // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-
-    delay(1000); 
-    
-    // Efek visual (Shutter)
-    tft.fillCircle(80, 64, 40, C_WHITE); 
-    delay(100); 
-    
-    // Catat ke Firebase bahwa hari ini sudah foto
-    logDailyActivity(currentID, "photo"); 
-    
-    // Kembali ke menu ukur
-    drawMeasureReadyUI(); 
-    currentState = STATE_MEASURE_READY;
-  } 
-  else if (key == 'B') { 
-    drawMeasureReadyUI(); 
-    currentState = STATE_MEASURE_READY; 
-  }
-  else if (key == '*') { 
-    drawMainMenu(); 
-    currentState = STATE_MENU; 
-  } 
-}
-
-void drawCamInterface() {
-  tft.fillScreen(C_BG); tft.setTextColor(C_WHITE); tft.drawRect(10, 20, 140, 80, C_WHITE); tft.setCursor(60, 55); tft.print("CAM VIEW"); tft.setCursor(10, 110); tft.print("[A] SHOOT   [*] KEMBALI");
-}
-
-void loopCamMode(char key) {
-  if (key == 'A') {
-    beepShort(); 
-    tft.fillScreen(C_WHITE); delay(100); tft.fillScreen(C_BG); tft.setCursor(40, 60); tft.setTextColor(C_WHITE); tft.print("Memproses...");
-    
-    // Kirim Perintah ke ESP32 (Hanya jika Online)
-    Serial.println("SNAP:" + currentID);
-    
-    delay(1000); 
-    logDailyActivity(currentID, "photo"); showStatusAnim(true); drawMainMenu(); currentState = STATE_MENU;
-  } else if (key == '*') { drawMainMenu(); currentState = STATE_MENU; }
-}
-
-void drawMeasureReadyUI() {
-  tft.fillScreen(C_BG); tft.setTextColor(C_WHITE); tft.setCursor(5, 5); if(flowType == 0) tft.print("DETEKSI CEPAT"); else { tft.print("ID: "); tft.print(currentID); }
-  tft.drawFastHLine(0, 20, 160, C_GRAY); tft.setCursor(10, 50); tft.setTextColor(C_WHITE); tft.print("SIAPKAN SENSOR...");
-  tft.fillRoundRect(10, 70, 140, 30, 4, C_DARK_GRAY); tft.setCursor(25, 80); tft.setTextColor(C_WARN); tft.print("TEKAN [A] UKUR"); tft.setCursor(10, 110); tft.setTextColor(C_ERROR); tft.print("[*] BATAL");
-}
-
-void loopMeasureReady(char key) {
-  if (key == 'A') {
-    tft.fillRoundRect(10, 70, 140, 30, 4, C_WHITE); tft.setCursor(35, 80); tft.setTextColor(C_BG); tft.print("MENGUKUR...");
-    for(int i=0; i<3; i++) { valTemp = mlx.readObjectTempC(); float voltage = analogRead(TDS_PIN) * (3.3 / 1024.0); valCond = voltage * 2.0; delay(50); }
-    if(isnan(valTemp) || valTemp > 1000) valTemp = 0.0;
-    drawResultUI(); currentState = STATE_RESULT;
-  } else if (key == '*') { drawMainMenu(); currentState = STATE_MENU; }
-}
-
-void drawResultUI() {
-  tft.fillScreen(C_BG); tft.setTextColor(C_WHITE); tft.setCursor(5, 5); if(flowType == 0) tft.print("HASIL UKUR"); else { tft.print("ID: "); tft.print(currentID); }
-  
-  // LOGIC STATUS (SESUAIKAN DENGAN WEB)
-  String status = "Normal"; uint16_t color = C_SUCCESS;
-  
-  if (valTemp > 39.5 || valCond > 6.0) { 
-    status = "Terindikasi Mastitis"; // Wajib sama dengan React App
-    color = C_ERROR; 
-    beepAlarm(); 
-  } 
-  else if (valTemp > 38.5 || valCond > 5.0) { 
-    status = "Waspada"; // Wajib sama dengan React App
-    color = C_WARN; 
-    beepShort(); 
-  }
-
-  // TAMPILAN DI LCD (Bisa disingkat agar muat)
-  String displayStatus = (status == "Terindikasi Mastitis") ? "MASTITIS" : (status == "Waspada" ? "WASPADA" : "NORMAL");
-
-  tft.setTextColor(C_WHITE); tft.setCursor(15, 25); tft.print("SUHU:"); tft.setTextSize(2); tft.setCursor(15, 37); tft.print(valTemp, 1); tft.setTextSize(1); tft.print(" C");
-  tft.setCursor(85, 25); tft.print("COND:"); tft.setTextSize(2); tft.setCursor(85, 37); tft.print(valCond, 1); tft.setTextSize(1); tft.print(" mS");
-  
-  tft.fillRoundRect(15, 65, 130, 24, 4, color); tft.setTextColor(C_BG); tft.setTextSize(2); 
-  int txtX = 80 - (displayStatus.length()*6); // Center text simple
-  tft.setCursor(txtX, 70); tft.print(displayStatus); tft.setTextSize(1);
-  
-  tft.setTextColor(C_WHITE); tft.setCursor(5, 110); if(flowType == 0) tft.print("[A] UKUR LAGI [*]MENU"); else { tft.print("[A]ULANG  [B]KIRIM"); tft.setCursor(5, 120); tft.print("[*] BATAL"); }
-}
-
-void loopResult(char key) {
-  if (key == 'A') { drawMeasureReadyUI(); currentState = STATE_MEASURE_READY; }
-  else if (key == '*') { drawMainMenu(); currentState = STATE_MENU; }
-  else if (key == 'B' && flowType == 1) { 
-    if(isOfflineMode) { showBypassMessage("GAGAL KIRIM", "MODE OFFLINE"); return; }
-    
-    tft.fillScreen(C_BG); tft.setCursor(40, 60); tft.setTextColor(C_WHITE); tft.print("Mengirim...");
-    
-    WiFiClientSecure client; client.setInsecure(); HTTPClient http;
-    
-    // RECALCULATE STATUS FOR SENDING
-    String status = "Normal";
-    if (valTemp > 39.5 || valCond > 6.0) status = "Terindikasi Mastitis";
-    else if (valTemp > 38.5 || valCond > 5.0) status = "Waspada";
-
-    String dateStr = getFullFormattedTime();
-    
-    // JSON SESUAI DASHBOARD.JSX
-    String json = "{\"cowId\":\""+currentID+"\",\"temp\":"+String(valTemp)+",\"conductivity\":"+String(valCond)+",\"status\":\""+status+"\",\"date\":\""+dateStr+"\",\"ts\":{\".sv\":\"timestamp\"}}";
-    
-    http.begin(client, String(dbBaseURL)+"detections.json"); int code = http.POST(json); http.end();
-    if(code == 200) { logDailyActivity(currentID, "sensor"); showStatusAnim(true); drawMainMenu(); currentState = STATE_MENU; }
-    else { showStatusAnim(false); drawMeasureReadyUI(); currentState = STATE_MEASURE_READY; }
-  }
-}
+void drawInputUI() { tft.fillScreen(C_BG); tft.setTextColor(C_WHITE); tft.setCursor(10, 10); tft.print("INPUT ID SAPI:"); tft.drawRoundRect(10, 30, 140, 40, 4, C_WHITE); tft.setCursor(10, 90); tft.setTextColor(C_GRAY); tft.print("[#]OK  [C]CLEAR [*]BATAL"); }
+void drawMeasureTempUI() { tft.fillScreen(C_BG); tft.setTextColor(C_WHITE); tft.setCursor(5, 5); tft.print("ID: " + currentID); tft.drawFastHLine(0, 18, 160, C_GRAY); tft.setCursor(35, 40); tft.print("STEP 1: SUHU"); tft.fillRoundRect(10, 70, 140, 30, 4, C_DARK_GRAY); tft.setTextColor(C_WARN); tft.setCursor(35, 80); tft.print("TEKAN [A] UKUR"); }
+void drawMeasureCondUI() { tft.fillScreen(C_BG); tft.setTextColor(C_WHITE); tft.setCursor(5, 5); tft.print("ID: " + currentID); tft.drawFastHLine(0, 18, 160, C_GRAY); tft.setCursor(15, 40); tft.print("STEP 2: KONDUKTIVITAS"); tft.fillRoundRect(10, 70, 140, 30, 4, C_DARK_GRAY); tft.setTextColor(C_WARN); tft.setCursor(35, 80); tft.print("TEKAN [A] UKUR"); }
+void drawCamInterface() { tft.fillScreen(C_BG); tft.setTextColor(C_WHITE); tft.setCursor(5, 5); tft.print("CAM: " + currentID); tft.drawRect(10, 25, 140, 75, C_WHITE); tft.setCursor(50, 55); tft.print("READY!"); tft.fillRoundRect(10, 105, 140, 20, 3, C_BLUE); tft.setCursor(25, 110); tft.setTextColor(C_WHITE); tft.print("TEKAN [A] CAPTURE"); }
+void drawResultUI() { tft.fillScreen(C_BG); tft.setTextColor(C_WHITE); tft.setCursor(5, 5); tft.print("ID: " + currentID); String st = "Normal"; uint16_t color = C_SUCCESS; if (valTemp > 39.0 || valCond > 6.5) { st = "Bahaya"; color = C_ERROR; } else if ((valTemp >= 38.1 && valTemp <= 39.0) || (valCond >= 6.1 && valCond <= 6.5)) { st = "Waspada"; color = C_WARN; } tft.setCursor(15, 30); tft.print("TEMP : "); tft.print(valTemp, 1); tft.print(" C"); tft.setCursor(15, 45); tft.print("COND : "); tft.print(valCond, 1); tft.print(" mS"); tft.fillRoundRect(10, 65, 140, 30, 5, color); tft.setTextColor(C_BG); tft.setTextSize(2); tft.setCursor(40, 73); tft.print(st); tft.setTextSize(1); tft.setTextColor(C_WHITE); tft.setCursor(5, 110); if (flowType == 0) tft.print("[A] ULANG   [*] MENU"); else tft.print("[A]ULANG [B]SEND [*]MENU"); }
+void drawPhotoAsk() { tft.fillScreen(C_BG); tft.setTextColor(C_WHITE); tft.setCursor(30, 20); tft.print("FOTO SAPI?"); tft.fillRoundRect(10, 60, 65, 30, 4, C_MOOCARE); tft.setTextColor(C_BG); tft.setCursor(22, 70); tft.print("[A] YA"); tft.drawRoundRect(85, 60, 65, 30, 4, C_WHITE); tft.setTextColor(C_WHITE); tft.setCursor(97, 70); tft.print("[B] NO"); }
+void showBypassMessage(String msg1, String msg2) { tft.fillScreen(C_BG); tft.fillRoundRect(10, 30, 140, 70, 5, C_WHITE); tft.setTextColor(C_DARK_GRAY); tft.setCursor(20, 45); tft.print("INFO:"); tft.setTextColor(C_ERROR); tft.setCursor(20, 65); tft.print(msg1); tft.setCursor(20, 80); tft.print(msg2); beepAlarm(); delay(2000); }
+void showStatusAnim(bool success) { tft.fillScreen(C_BG); int cx = 80, cy = 60; for(int r=0; r<=30; r+=6) { tft.fillCircle(cx, cy, r, C_WHITE); delay(20); } if(success) { beepShort(); tft.setCursor(45, 105); tft.setTextColor(C_SUCCESS); tft.print("BERHASIL"); } else { tft.setCursor(55, 105); tft.setTextColor(C_ERROR); tft.print("GAGAL"); } delay(1500); }
+void showLoadingBar(int p) { int w = map(p, 0, 100, 0, 120); tft.drawRoundRect(20, 80, 122, 10, 3, C_GRAY); tft.fillRect(21, 81, w, 8, C_MOOCARE); tft.fillRect(70, 95, 40, 10, C_BG); tft.setTextColor(C_WHITE); tft.setCursor(75, 95); tft.print(p); tft.print("%"); }
+void beepShort() { digitalWrite(PIN_BUZZER, HIGH); delay(100); digitalWrite(PIN_BUZZER, LOW); }
+void beepAlarm() { for(int i=0; i<3; i++) { digitalWrite(PIN_BUZZER, HIGH); delay(80); digitalWrite(PIN_BUZZER, LOW); delay(50); } }
+char readKeypad() { for (int r = 0; r < 4; r++) { for (int i = 0; i < 4; i++) pcf8574.write(rowPins[i], HIGH); pcf8574.write(rowPins[r], LOW); for (int c = 0; c < 4; c++) { if (pcf8574.read(colPins[c]) == LOW) { beepShort(); delay(150); while(pcf8574.read(colPins[c]) == LOW) yield(); return keys[r][c]; } } } return 0; }
+bool validateIDInDB(String id) { if (isOfflineMode) return true; WiFiClientSecure cl; cl.setInsecure(); HTTPClient ht; ht.begin(cl, String(dbBaseURL) + "cows.json?orderBy=\"id\"&equalTo=\"" + id + "\""); int code = ht.GET(); String res = ht.getString(); ht.end(); return (code == 200 && res.length() > 5); }
+bool checkDailyDuplicate(String id, String type) { if (isOfflineMode) return false; time_t n = time(nullptr); struct tm* t = localtime(&n); char today[12]; strftime(today, sizeof(today), "%Y-%m-%d", t); WiFiClientSecure cl; cl.setInsecure(); HTTPClient ht; ht.begin(cl, String(dbBaseURL) + "daily_logs/" + String(today) + "/" + id + "/" + type + ".json"); int code = ht.GET(); String res = ht.getString(); ht.end(); return (code == 200 && res != "null"); }
+void logDailyActivity(String id, String type) { if (isOfflineMode) return; time_t n = time(nullptr); struct tm* t = localtime(&n); char today[12]; strftime(today, sizeof(today), "%Y-%m-%d", t); WiFiClientSecure cl; cl.setInsecure(); HTTPClient ht; ht.begin(cl, String(dbBaseURL) + "daily_logs/" + String(today) + "/" + id + "/" + type + ".json"); ht.PUT("true"); ht.end(); }
+String getFullFormattedTime() { time_t n = time(nullptr); struct tm* ti = localtime(&n); char b[20]; strftime(b, sizeof(b), "%Y-%m-%d %H:%M", ti); return String(b); }
+void connectAutoOpen() { tft.fillScreen(C_BG); tft.setTextColor(C_WHITE); tft.setCursor(10, 40); tft.print("Scanning WiFi..."); int n = WiFi.scanNetworks(); bool found = false; String connectedSSID = ""; for (int i = 0; i < n; ++i) { if (WiFi.encryptionType(i) == ENC_TYPE_NONE) { connectedSSID = WiFi.SSID(i); tft.setCursor(10, 80); tft.setTextColor(C_MOOCARE); tft.print(connectedSSID); WiFi.begin(connectedSSID.c_str()); unsigned long s = millis(); while(millis() - s < 8000) { if(WiFi.status() == WL_CONNECTED) { found = true; break; } delay(100); } if(found) break; } } if(found) { isOfflineMode = false; configTime(TZ_OFFSET, 0, "pool.ntp.org"); delay(500); fetchServerConfig(); tft.fillScreen(C_BG); tft.setCursor(10, 50); tft.setTextColor(C_WHITE); tft.print("Sharing WiFi..."); for(int i=0; i<3; i++) { Serial.println("WIFI:" + connectedSSID); delay(100); } delay(500); drawMainMenu(); } else { showBypassMessage("FAILED", "NO WIFI"); drawMainMenu(); } }
+void drawSignal(int x, int y, uint16_t color) { for(int i=0; i<4; i++) tft.fillRect(x+(i*3), y+(6-(i*2)), 2, 4+(i*2), color); }
+void drawIconQuick(int x, int y, uint16_t color) { tft.fillTriangle(x+10, y, x+4, y+10, x+10, y+10, color); tft.fillTriangle(x+8, y+20, x+16, y+8, x+8, y+8, color); }
+void drawIconCow(int x, int y, uint16_t color) { tft.fillRoundRect(x, y+4, 22, 14, 3, color); tft.fillCircle(x+2, y+4, 3, color); tft.fillCircle(x+20, y+4, 3, color); tft.fillRect(x+7, y+13, 8, 4, C_BG); }
+void drawIconCam(int x, int y, uint16_t color) { tft.fillRoundRect(x, y+4, 24, 15, 2, color); tft.fillRect(x+8, y, 8, 4, color); tft.fillCircle(x+12, y+11, 6, C_BG); tft.fillCircle(x+12, y+11, 2, color); }
+void drawIconWiFi(int x, int y, uint16_t color) { tft.fillCircle(x+12, y+15, 3, color); tft.drawCircle(x+12, y+15, 7, color); tft.drawCircle(x+12, y+15, 11, color); }
+void drawIconRescan(int x, int y, uint16_t color) { tft.drawCircle(x+12, y+10, 8, color); tft.fillTriangle(x+18, y+2, x+22, y+10, x+14, y+10, color); }

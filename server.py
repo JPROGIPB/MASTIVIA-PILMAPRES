@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 import tensorflow as tf
 from tensorflow.keras.preprocessing import image
@@ -46,13 +46,27 @@ try:
         
         # Upload ke Firebase path: /server_config/ip
         ref = db.reference('server_config')
-        ref.update({
+        
+        # Cek apakah ada ngrok_url yang sudah tersimpan
+        existing_ngrok = ref.child('ngrok_url').get() or ""
+        
+        server_config = {
             'ip': current_ip,
             'port': 5000,
-            'last_active': {'.sv': 'timestamp'}
-        })
+            'last_active': {'.sv': 'timestamp'},
+            'ngrok_url': existing_ngrok  # Pertahankan ngrok URL yang ada
+        }
+        
+        ref.update(server_config)
         print(">> SUKSES: IP Server berhasil di-upload ke Firebase.")
-        print(">> ESP32 sekarang akan otomatis mengambil IP ini.\n")
+        print(">> ESP32 sekarang akan otomatis mengambil IP ini.")
+        if existing_ngrok:
+            print(f">> Ngrok URL: {existing_ngrok}")
+            print(f">> TIPS: Untuk update ngrok URL, jalankan: python update_ngrok_url.py <ngrok_url>")
+        else:
+            print(f">> INFO: Ngrok URL belum di-set. Server berjalan di mode LOCAL.")
+            print(f">> TIPS: Untuk enable ngrok, jalankan: python update_ngrok_url.py <ngrok_url>")
+        print()
     else:
         print(f"Warning: File credential tidak ditemukan di {SERVICE_ACCOUNT_KEY}")
 
@@ -80,11 +94,88 @@ UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'MooCar
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 print(f"DEBUG: Folder Upload siap di: {UPLOAD_FOLDER}")
 
+# Endpoint untuk serve gambar (agar Vite bisa akses)
+@app.route('/images/<filename>', methods=['GET'])
+def serve_image(filename):
+    """Serve uploaded images dari Flask server"""
+    return send_from_directory(UPLOAD_FOLDER, filename)
+
 @app.route('/upload', methods=['POST'])
 def upload_file():
     print("\n>>> [DEBUG] Menerima request upload dari ESP32...")
+    print(f">>> [DEBUG] Content-Type: {request.content_type}")
     
-    if 'image' not in request.files:
+    # CASE 1: ESP32-CAM mengirim raw JPEG (Content-Type: image/jpeg)
+    if request.content_type and 'image/jpeg' in request.content_type:
+        print(">>> [MODE] ESP32-CAM Raw JPEG")
+        
+        # Ambil cow_id dari query parameter (ESP32 akan kirim: /upload?id=S001)
+        cow_id = request.args.get('id', 'unknown')
+        
+        # Baca raw data dari request body
+        image_data = request.data
+        
+        if not image_data:
+            print(">>> [ERROR] Gagal: Data gambar kosong.")
+            return jsonify({'error': 'No image data'}), 400
+        
+        try:
+            # Generate unique filename
+            timestamp = int(time.time())
+            filename = f"capture_{cow_id}_{timestamp}.jpg"
+            filepath = os.path.join(UPLOAD_FOLDER, filename)
+            
+            print(f">>> [DEBUG] Menyimpan file ke: {filepath} (Cow ID: {cow_id})")
+            
+            # Save raw JPEG data
+            with open(filepath, 'wb') as f:
+                f.write(image_data)
+            
+            if os.path.exists(filepath):
+                print(f">>> [SUCCESS] File Tersimpan! Ukuran: {os.path.getsize(filepath)} bytes")
+            else:
+                print(">>> [ERROR] File write gagal.")
+                return jsonify({'error': 'File write failed'}), 500
+
+            # Return URL relative to public folder
+            web_url = f"/assets/images/uploads/{filename}"
+            
+            # Update Firebase
+            try:
+                print(f">>> [FIREBASE] Attempting to update profile for ID: {cow_id}")
+                cows_ref = db.reference('cows')
+                snapshot = cows_ref.order_by_child('id').equal_to(cow_id).get()
+                
+                # Retry dengan format alternatif
+                if not snapshot and cow_id.isdigit():
+                    alt_id = f"S{cow_id}"
+                    print(f">>> [FIREBASE] ID '{cow_id}' not found. Trying '{alt_id}'...")
+                    snapshot = cows_ref.order_by_child('id').equal_to(alt_id).get()
+                
+                if snapshot:
+                    for key, val in snapshot.items():
+                        updates = {'iotImage': web_url}
+                        cows_ref.child(key).update(updates)
+                        print(f">>> [FIREBASE] SUCCESS! Updated iotImage for {cow_id} (key: {key})")
+                else:
+                    print(f">>> [FIREBASE] Warning: Cow ID '{cow_id}' not found in database.")
+                    
+            except Exception as fb_err:
+                print(f">>> [FIREBASE ERROR] Failed to update DB: {fb_err}")
+            
+            return jsonify({
+                'message': 'File uploaded successfully', 
+                'url': web_url,
+                'cow_id': cow_id,
+                'size': len(image_data)
+            }), 200
+            
+        except Exception as e:
+            print(f">>> [EXCEPTION] Error saat save: {e}")
+            return jsonify({'error': str(e)}), 500
+    
+    # CASE 2: Upload dari Web (multipart/form-data)
+    elif 'image' not in request.files:
         print(">>> [ERROR] Gagal: Key 'image' tidak ditemukan di request.")
         print(f">>> [DEBUG] Header: {request.headers}")
         return jsonify({'error': 'No image file provided'}), 400
@@ -102,7 +193,6 @@ def upload_file():
             cow_id = original_filename.split('.')[0] # Simple split
             
             # Generate unique filename on disk
-            import time
             timestamp = int(time.time())
             filename = f"capture_{cow_id}_{timestamp}.jpg"
             filepath = os.path.join(UPLOAD_FOLDER, filename)
@@ -115,8 +205,9 @@ def upload_file():
             else:
                  print(">>> [ERROR] File.save() jalan tapi file tidak muncul.")
 
-            # Return URL relative to public folder (for Vite/React)
-            web_url = f"/assets/images/uploads/{filename}"
+            # Return URL LENGKAP ke Flask server (bukan relative path)
+            current_ip = get_local_ip()
+            web_url = f"http://{current_ip}:5000/images/{filename}"
             
             # --- AUTO UPDATE FIREBASE (SERVER SIDE RELIABILITY) ---
             # Update Firebase directly from Server to ensure UI sync
@@ -134,17 +225,7 @@ def upload_file():
 
                 if snapshot:
                     for key, val in snapshot.items():
-                        # FIX LOGIC: Hapus profil photo jika itu adalah bekas capture lama
-                        # Tapi lebih aman kita update iotImage saja.
-                        # Agar user yakin, kita print log yang sangat jelas
-                        
                         updates = {'iotImage': web_url}
-                        
-                        # OPTIONAL: Jika Anda ingin "membersihkan" profilePhoto yang terlanjur salah (berisi capture_)
-                        # Anda bisa uncomment baris di bawah ini, tapi hati-hati menghapus foto asli user.
-                        # if val.get('profilePhoto', '').startswith('/assets/images/uploads/capture_'):
-                        #    updates['profilePhoto'] = None 
-                        
                         cows_ref.child(key).update(updates)
                         print(f">>> [FIREBASE] SUCCESS! Updated iotImage for {cow_id} (key: {key})")
                         print(f">>> [DEBUG] URL: {web_url}")

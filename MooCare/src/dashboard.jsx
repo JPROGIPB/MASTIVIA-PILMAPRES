@@ -60,15 +60,15 @@ const MooCareApp = () => {
         })).reverse(); // Show newest first
         setDetectionData(loadedDetections);
         
-        // Populate Notifications form Mastitis cases
+        // Populate Notifications form Bahaya cases
         const alerts = loadedDetections
-          .filter(d => d.status === 'Terindikasi Mastitis')
+          .filter(d => d.status === 'Bahaya')
           .map((d, index) => ({
              id: index,
              cowId: d.cowId,
              type: 'danger',
-             title: 'Terindikasi Mastitis',
-             message: `Sapi ${d.cowId} terdeteksi gejala mastitis!`,
+             title: 'Status Bahaya',
+             message: `Sapi ${d.cowId} terdeteksi dalam kondisi bahaya!`,
              time: d.date.split(' ')[1] || '-',
              date: d.date.split(' ')[0] || '-',
              read: false
@@ -116,7 +116,7 @@ const MooCareApp = () => {
   const statusData = [
     { name: 'Normal', value: detectionData.filter(d => d.status === 'Normal').length, color: '#10b981' },
     { name: 'Waspada', value: detectionData.filter(d => d.status === 'Waspada').length, color: '#f59e0b' },
-    { name: 'Mastitis', value: detectionData.filter(d => d.status === 'Terindikasi Mastitis').length, color: '#ef4444' },
+    { name: 'Bahaya', value: detectionData.filter(d => d.status === 'Bahaya').length, color: '#ef4444' },
   ];
 
   // Data untuk grafik pemeriksaan -> Simplified
@@ -430,13 +430,7 @@ const MooCareApp = () => {
                </nav>
 
                <div className="p-4 border-t border-gray-50">
-                    <div className="bg-gradient-to-br from-green-600 to-emerald-600 rounded-2xl p-4 text-white shadow-lg relative overflow-hidden">
-                       <p className="font-bold text-sm mb-1">Status Sistem</p>
-                       <div className="flex items-center gap-2 text-xs text-green-100 mb-3">
-                          <span className="w-2 h-2 bg-green-300 rounded-full animate-pulse"></span>
-                          Online
-                       </div>
-                    </div>
+                    {/* Status Sistem Dihilangkan - Dummy */}
                </div>
            </aside>
         </div>
@@ -511,7 +505,7 @@ const MooCareApp = () => {
                  </button>
                  <div>
                     <h2 className="text-lg md:text-2xl font-bold text-gray-800 tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-gray-800 to-gray-600 truncate max-w-[200px] md:max-w-none">
-                        {activePage === 'dashboard' ? 'Dashboard Overview' : activePage === 'history' ? 'Data Deteksi' : activePage === 'analysis' ? 'Analisis Cepat' : 'Manajemen Data Sapi'}
+                        {activePage === 'dashboard' ? 'Dashboard' : activePage === 'history' ? 'Data Deteksi' : activePage === 'analysis' ? 'Analisis Cepat' : 'Manajemen Data Sapi'}
                     </h2>
                     <p className="text-xs text-gray-500 hidden md:block">Selamat datang kembali, Admin</p>
                  </div>
@@ -587,7 +581,7 @@ const MooCareApp = () => {
                        <AlertCircle className="w-6 h-6 text-red-600" />
                     </div>
                     <div>
-                       <h4 className="font-bold text-red-600">Terdeteksi Mastitis!</h4>
+                       <h4 className="font-bold text-red-600">Kondisi Bahaya!</h4>
                        <p className="text-sm text-gray-600 mt-1 mb-3">Sapi <span className="font-bold">{notificationData.cowId}</span> menunjukkan gejala.</p>
                        <div className="flex gap-2">
                           <button onClick={() => { handleViewDetail(notificationData); setShowNotification(false); }} className="text-xs bg-red-600 text-white px-3 py-1.5 rounded-md hover:bg-red-700 transition">Lihat Detail</button>
@@ -632,28 +626,9 @@ const MooCareApp = () => {
                <div className="space-y-8 animate-fadeIn">
                   
                   {/* Stats Cards - Colorful Row */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-6">
-                     {/* System Status Card */}
-                     <div className="bg-gradient-to-br from-gray-800 to-gray-900 rounded-2xl p-6 text-white shadow-lg shadow-gray-200 relative overflow-hidden group hover:-translate-y-1 transition duration-300">
-                        <div className="absolute top-0 right-0 w-24 h-24 bg-white opacity-5 rounded-full -mr-8 -mt-8 group-hover:scale-125 transition duration-500"></div>
-                        <div className="relative z-10">
-                           <div className="flex justify-between items-start mb-4">
-                              <div className="bg-white/10 p-2.5 rounded-xl backdrop-blur-sm">
-                                 <Activity className="w-6 h-6 text-green-400" />
-                              </div>
-                              <div className="flex items-center gap-2 text-xs font-bold bg-green-500/20 px-2 py-1 rounded-full text-green-400 border border-green-500/30">
-                                 <span className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></span>
-                                 Online
-                              </div>
-                           </div>
-                           <h3 className="text-lg font-bold mb-2">Status Sistem</h3>
-                           <button className="w-full py-2 bg-green-600 hover:bg-green-700 rounded-lg text-xs font-bold text-white transition flex items-center justify-center gap-2" onClick={() => alert('Sistem terhubung ke Firebase Realtime Database')}>
-                              Cek Koneksi ESP32
-                           </button>
-                        </div>
-                     </div>
-
-                     {/* Blue Card */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 xl:grid-cols-4 gap-6">
+                     
+                     {/* Card Total Sapi - Biru */}
                      <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-2xl p-6 text-white shadow-lg shadow-blue-200 relative overflow-hidden group hover:-translate-y-1 transition duration-300">
                         <div className="absolute top-0 right-0 w-24 h-24 bg-white opacity-10 rounded-full -mr-8 -mt-8 group-hover:scale-125 transition duration-500"></div>
                         <div className="relative z-10">
@@ -709,7 +684,7 @@ const MooCareApp = () => {
                               <span className="text-xs font-medium bg-white/20 px-2 py-1 rounded-full text-emerald-50">Normal</span>
                            </div>
                            <h3 className="text-3xl font-bold mb-1">{stats.avgConductivity}</h3>
-                           <p className="text-emerald-100 text-sm font-medium">Avg Konduktivitas</p>
+                           <p className="text-emerald-100 text-sm font-medium">Rata-rata Konduktivitas</p>
                         </div>
                      </div>
                   </div>
@@ -887,7 +862,7 @@ const MooCareApp = () => {
                               <option value="all">Semua Status</option>
                               <option value="Normal">Normal</option>
                               <option value="Waspada">Waspada</option>
-                              <option value="Terindikasi Mastitis">Terindikasi Mastitis</option>
+                              <option value="Bahaya">Bahaya</option>
                            </select>
                         </div>
                      </div>
@@ -1198,6 +1173,7 @@ const MooCareApp = () => {
                                 className="w-full h-full object-cover opacity-90 group-hover:opacity-100 transition"
                                 style={{ transform: 'rotate(180deg)' }}
                                 onError={(e) => {
+                                    console.error('Image load error:', selectedCow.iotImage);
                                     e.target.onerror = null; 
                                     e.target.src = "https://via.placeholder.com/300x200?text=Error+Loading+Image";
                                 }}
